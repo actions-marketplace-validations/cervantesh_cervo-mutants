@@ -1,11 +1,25 @@
 # 24-Month Architecture-Led Maturity Roadmap
 
-Tracking issue: #179
+Historical roadmap tracker: #179  
+Current-state refresh: 2026-06-28
 
 This roadmap replaces the earlier 18-month roadmap as the planning source of
 truth. It expands the maturity horizon to 24 months while preserving the
 already-seeded Phase 1-4 issue backbone as historical groundwork rather than
 reopening it.
+
+## Status On 2026-06-28
+
+- This document remains the strategic roadmap for CervoMutants.
+- Phases 1-4 are still the correct historical backbone, but they are no longer
+  active tracker epics.
+- Phase 5 (`#180`) and Phase 6 (`#181`) are also closed; they now represent
+  seeded future-direction backlog rather than the repo's currently active
+  execution lane.
+- The current open repo-owned backlog is concentrated in Phase 2 hardening:
+  epic `#352`, child issues `#353`-`#364`, plus the active gate-policy follow-up
+  `#368`.
+- The latest public release is `v0.4.4` from 2026-06-28.
 
 ## Starting Point
 
@@ -35,12 +49,16 @@ reopening it.
 | `16-20` months | `4.5 / 5` | `4.2 / 5` | `4.2 / 5` | `4.3 / 5` | #180 |
 | `20-24` months | `4.7 / 5` | `4.4 / 5` | `4.4 / 5` | `4.5 / 5` | #181 |
 
+These targets remain directional. This refresh does not reseed a new future
+backlog; it only aligns the roadmap text with the current repo state.
+
 ## Foundation Carried Forward
 
 The earlier roadmap tracker #63 and its phase epics #64-#67 are closed and now
 serve as the historical backbone for the first four phases of this maturity
 path. The v2 roadmap keeps those phases visible for continuity, but does not
-reseed them as new tracker work.
+reseed them as new tracker work. Current execution now lives in newer follow-up
+epics and issues rather than in those original phase trackers.
 
 ### Phase 1: Signal Core And Complexity Reduction
 
@@ -78,6 +96,8 @@ Phase 1 exit gates:
 
 Historical epic: #65  
 Historical initiative set: #75, #76, #77, #78, #79, #80, #81
+Current active hardening epic: #352  
+Current active child backlog: #353-#364
 
 - turn the HTML report into a review workbench with filters for actionability,
   operator, semantic group, owner, and history state
