@@ -140,6 +140,50 @@ func TestInitListMutatorsExplainAndExitCodes(t *testing.T) {
 	}
 }
 
+func TestGateFailuresExitOneRegardlessOfWhichCheckFailed(t *testing.T) {
+	// Only the fail_under check mentions "threshold", so a message-based
+	// classification would sort every other gate into exit 2, which is the code
+	// for environment errors and crashes. A gate verdict must stay
+	// distinguishable from a malfunction.
+	checks := []struct {
+		name    string
+		summary string
+	}{
+		{"fail_under", "score 60.00 below threshold 75.00"},
+		{"baseline_regression", "regression detected against baseline"},
+		{"baseline_new_survivors", "2 new survivors against baseline"},
+		{"timed_out", "1 mutant timed out"},
+		{"compile_error", "3 mutants failed to compile"},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			err := newGateFailureError(engine.GateEvaluation{
+				Evaluated:    true,
+				Passed:       false,
+				FailedChecks: []string{check.name},
+				Checks: []engine.GateCheck{
+					{Name: check.name, Status: engine.GateCheckFailed, Summary: check.summary},
+				},
+			})
+			if code := exitCode(err); code != 1 {
+				t.Fatalf("exitCode for %s gate = %d, want 1 (message was %q)", check.name, code, err.Error())
+			}
+		})
+	}
+
+	// A wrapped gate failure must still be recognised, since errors.As is the
+	// whole point of matching on the type.
+	wrapped := fmt.Errorf("run failed: %w", newGateFailureError(engine.GateEvaluation{
+		Evaluated:    true,
+		Passed:       false,
+		FailedChecks: []string{"timed_out"},
+		Checks:       []engine.GateCheck{{Name: "timed_out", Status: engine.GateCheckFailed, Summary: "1 mutant timed out"}},
+	}))
+	if code := exitCode(wrapped); code != 1 {
+		t.Fatalf("exitCode for wrapped gate failure = %d, want 1", code)
+	}
+}
+
 func TestDoctorAffectedFastAndBaselineCommands(t *testing.T) {
 	dir := writeCLIFixture(t)
 	out := filepath.Join(dir, "out")
