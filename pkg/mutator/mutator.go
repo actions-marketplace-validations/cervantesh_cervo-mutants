@@ -479,6 +479,9 @@ func addIdentMutants(ctx mutationContext, ident *ast.Ident) {
 
 func addBasicLitMutants(ctx mutationContext, lit *ast.BasicLit) {
 	if lit.Kind == token.STRING && lit.Value != `""` {
+		if isImportPath(ctx.parents, lit) {
+			return
+		}
 		addMutation(ctx, lit, opStringEmptyLiterals, lit.Value, `""`)
 		addMutation(ctx, lit, opLiterals, lit.Value, `""`)
 		return
@@ -714,6 +717,16 @@ func buildParentIndex(root ast.Node) map[ast.Node]ast.Node {
 		return true
 	})
 	return parents
+}
+
+// isImportPath reports whether node is the Path literal of an *ast.ImportSpec.
+func isImportPath(parents map[ast.Node]ast.Node, node ast.Node) bool {
+	lit, ok := node.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return false
+	}
+	spec, ok := parents[lit].(*ast.ImportSpec)
+	return ok && spec.Path == lit
 }
 
 func classifySemanticMutation(ctx mutationContext, node ast.Node, operator string) semanticMetadata {
