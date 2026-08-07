@@ -29,10 +29,9 @@ jobs:
       - run: go run ./cmd/cervomut list-mutators
       - run: go run ./cmd/cervomut fast ./pkg/config --max-mutants 3 --workers 2 --out .cervomut/ci-smoke
       - run: test -f .cervomut/ci-smoke/mutation-report.json
+      - run: go run ./cmd/actionhelper validate-report-content --path .cervomut/ci-smoke/mutation-report.json
       - run: go run ./cmd/cervomut run ./pkg/config --policy ci-balanced --max-mutants 5 --workers 2 --out .cervomut/ci-balanced-smoke
-      - run: >-
-          grep -q '"schema_version": "1"'
-          .cervomut/ci-balanced-smoke/mutation-report.json
+      - run: go run ./cmd/actionhelper validate-report-content --path .cervomut/ci-balanced-smoke/mutation-report.json
 
   compatibility-smoke:
     name: compatibility-smoke (${{ matrix.os }}, Go ${{ matrix.go-version }})
@@ -75,8 +74,10 @@ jobs:
           workers: "1"
           max-mutants: "1"
       - run: test -f .cervomut/action-smoke/mutation-report.json
+      - run: go run ./cmd/actionhelper validate-report-content --path .cervomut/action-smoke/mutation-report.json
       - run: test -n "${{ steps.cervomut.outputs.report-dir }}"
       - run: test -f "${{ steps.cervomut.outputs.report-dir }}/mutation-report.json"
+      - run: go run ./cmd/actionhelper validate-report-content --path "${{ steps.cervomut.outputs.report-dir }}/mutation-report.json"
 
   upgrade-compat-smoke:
     if: github.event_name != 'release'
