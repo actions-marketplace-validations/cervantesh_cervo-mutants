@@ -179,13 +179,19 @@
   "thresholds": {
     "baseline": {
       "enabled": true,
-      "fail_on_new_survivors": true,
-      "fail_on_regression": true
+      "new_survivors": 1,
+      "regression": true
     },
     "fail_on_compile_error": false,
     "fail_on_timeout": true,
     "fail_under": 75,
-    "failed": false
+    "failed": true,
+    "failed_checks": [
+      "fail_under",
+      "baseline_regression",
+      "baseline_new_survivors",
+      "timed_out"
+    ]
   },
   "gate": {
     "evaluated": true,
@@ -226,7 +232,6 @@
   },
   "baseline": {
     "enabled": true,
-    "available": true,
     "regression": true,
     "new_survivors": [
       "pkg/review.go:19:conditionals-boundary:123"
