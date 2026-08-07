@@ -12,6 +12,44 @@ The format is intentionally simple:
 
 - No unreleased entries yet.
 
+## [v0.4.5] - 2026-08-07
+
+### Added
+
+- `cervomut run` now evaluates baseline and CI gate policy at end of run and
+  records a structured `gate` evaluation on the public report (#368).
+- `cmd/actionhelper validate-report-content` checks mutation-report.json for
+  schema/summary content, and CI/Action smoke uses it so empty or degraded
+  reports fail even when the file exists (#364).
+- Shared `pkg/report/reporttest` fixture harness and expanded public-report
+  goldens/contract matrices for report and CLI surfaces (#352–#363).
+
+### Changed
+
+- Gate failures return exit code `1` for every named gate check (`fail_under`,
+  `baseline_regression`, `baseline_new_survivors`, `timed_out`,
+  `compile_error`), not only messages that happen to contain "threshold" (#368).
+- Struct-tag mutants from `string-empty-literals` / `literals` can override
+  `equivalent_risk` to `high` when emptying the tag is provably equivalent
+  (yaml name matches decoder default, no options; empty json names only). Non-
+  empty json names are never treated as equivalent because of tag-dominance
+  collision rules in `encoding/json` (#375).
+
+### Fixed
+
+- Import-path string literals are no longer mutated into `import ""`, which
+  could only ever produce compile errors and deflated the mutation score (#374).
+
+### Documentation
+
+- Live install and GitHub Action docs pin `v0.4.5` as the latest public release.
+
+### Verification
+
+- `go test ./pkg/mutator/... ./pkg/report/... ./cmd/actionhelper/`
+- `go test ./cmd/cervomut/ -skip TestEvalCommandWritesEvaluationArtifacts`
+- `go run ./cmd/releasehelper notes --version v0.4.5 --out .tmp/release-notes-v0.4.5.md`
+
 ## [v0.4.4] - 2026-06-27
 
 ### Changed
@@ -188,3 +226,4 @@ The format is intentionally simple:
 ### Verification
 
 - `go test ./...`
+

@@ -11,7 +11,7 @@ product, code, and operations. It is intentionally time-bound: maturity can
 move quickly as CI, releases, public adoption, and major features change.
 
 This refresh evaluates the current `main` branch state on 2026-06-28. At
-capture time, the latest public release was `v0.4.4` from 2026-06-28. Compared
+capture time, the latest public release was `v0.4.5` from 2026-08-07. Compared
 with the 2026-06-19 snapshot, this pass is a current-state alignment refresh:
 release references, open backlog references, local validation evidence, and
 repo-size counts are updated to today.
@@ -60,7 +60,7 @@ longer a major lag between repository head and latest public release. The
 bigger remaining gaps are still direct external maintainer adoption evidence
 and release repetition over time. The repo now also has a stronger broader-
 profile released hosted sample on `v0.4.2`, while the latest public release is
-now `v0.4.4`, so the open maturity question is
+now `v0.4.5`, so the open maturity question is
 less about whether the newer review surfaces can produce bounded mixed-profile
 signal and more about repeated external use over time.
 
@@ -82,8 +82,8 @@ release-head gap.
 
 - Public GitHub repository created on 2026-06-17.
 - Public releases present at capture time on 2026-06-28: `v0.1.0`, `v0.2.0`, `v0.3.0`,
-  `v0.4.0`, `v0.4.1`, `v0.4.2`, `v0.4.3`, and `v0.4.4`.
-- At capture time, the latest public release was `v0.4.4` from 2026-06-28 with multi-OS assets,
+  `v0.4.0`, `v0.4.1`, `v0.4.2`, `v0.4.3`, and `v0.4.5`.
+- At capture time, the latest public release was `v0.4.5` from 2026-08-07 with multi-OS assets,
   `release-manifest.json`, and `SHA256SUMS`.
 - The broader-profile released hosted validation on `v0.4.2` showed `37`
   effective mutants, `9` survivors, `8` actionable review units, and `0`
@@ -130,7 +130,7 @@ release-head gap.
 At capture time, the latest release was effectively aligned with
 repository-head maturity for the supported public surfaces.
 
-The current latest release line through `v0.4.4` keeps that supported-surface
+The current latest release line through `v0.4.5` keeps that supported-surface
 alignment intact. Across the `v0.4.x` public line, the published surface now
 includes:
 
@@ -331,3 +331,4 @@ transition is not "make the repo stop looking broken," and it is no longer
 "catch the public release up to the hardened repo head." The next transition is
 "gather deeper external evidence, keep release discipline steady, and calibrate
 the remaining judgment-heavy features from real usage."
+
