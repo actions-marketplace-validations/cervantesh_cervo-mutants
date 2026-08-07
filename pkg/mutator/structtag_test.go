@@ -76,10 +76,12 @@ type Config struct {
 	}
 }
 
-func TestJsonExactCaseSensitiveDerivation(t *testing.T) {
-	// encoding/json Unmarshal falls back to case-insensitive matching, so
-	// json:"type" on field Type would still decode. Marshal would emit "Type"
-	// instead of "type", so only the exact case-sensitive match is high.
+func TestNonEmptyJsonTagNameIsNeverProvablyEquivalent(t *testing.T) {
+	// encoding/json resolves same-name collisions by depth, then by whether the
+	// field carries a tag. Emptying a json tag flips that "tagged" flag, so even
+	// a byte-exact match with the derived name can change which field wins. The
+	// collision is not visible from the field alone, so no non-empty json name
+	// qualifies, whether it matches the field name exactly or only by case.
 	src := `package sample
 
 type Exact struct {
@@ -98,7 +100,7 @@ type Fold struct {
 	if len(exact) != 1 {
 		t.Fatalf("exact: want 1 mutant, got %d: %+v", len(exact), mutants)
 	}
-	assertHighStructTagEquivalent(t, exact[0])
+	assertMediumNoStructTagEquivalent(t, exact[0])
 
 	folded := tagMutantsForOriginal(mutants, opStringEmptyLiterals, "`json:\"type\"`")
 	if len(folded) != 1 {
@@ -107,10 +109,73 @@ type Fold struct {
 	assertMediumNoStructTagEquivalent(t, folded[0])
 }
 
+func TestJsonTagDominanceCollisionIsNotMarkedEquivalent(t *testing.T) {
+	// Regression for the two concrete false positives this predicate used to
+	// produce. In Colliding, emptying the tag changes Marshal from {} to
+	// {"Name":...}. In the embedded case the colliding field lives in a
+	// different type declaration entirely, at equal depth, so a field-local
+	// predicate can never see it.
+	src := `package sample
+
+type Colliding struct {
+	Name  string ` + "`json:\"Name\"`" + `
+	Other string ` + "`json:\"Name\"`" + `
+}
+
+type A struct {
+	Name string ` + "`json:\"Name\"`" + `
+}
+
+type B struct {
+	Name string
+}
+
+type Embeds struct {
+	A
+	B
+}
+`
+	mutants, err := Generate("sample", "sample.go", []byte(src), ProfileDefault)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	found := tagMutantsForOriginal(mutants, opStringEmptyLiterals, "`json:\"Name\"`")
+	if len(found) != 3 {
+		t.Fatalf("want 3 json:\"Name\" tag mutants, got %d: %+v", len(found), mutants)
+	}
+	for _, mutant := range found {
+		assertMediumNoStructTagEquivalent(t, mutant)
+	}
+}
+
+func TestEmptyJsonTagNameStaysEquivalent(t *testing.T) {
+	// json:"" leaves encoding/json's tagged flag false both before and after the
+	// mutation, so it is unaffected by the dominance rule above.
+	src := `package sample
+
+type T struct {
+	Type string ` + "`json:\"\"`" + `
+}
+`
+	mutants, err := Generate("sample", "sample.go", []byte(src), ProfileDefault)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	found := tagMutantsForOriginal(mutants, opStringEmptyLiterals, "`json:\"\"`")
+	if len(found) != 1 {
+		t.Fatalf("want 1 mutant, got %d: %+v", len(found), mutants)
+	}
+	assertHighStructTagEquivalent(t, found[0])
+}
+
 func TestMultiKeyTagsRequireEveryKeyToMatch(t *testing.T) {
 	src := `package sample
 
 type AllMatch struct {
+	Type string ` + "`yaml:\"type\" json:\"\"`" + `
+}
+
+type JsonNamed struct {
 	Type string ` + "`json:\"Type\" yaml:\"type\"`" + `
 }
 
@@ -127,11 +192,19 @@ type UnknownKey struct {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	allMatch := tagMutantsForOriginal(mutants, opStringEmptyLiterals, "`json:\"Type\" yaml:\"type\"`")
+	// Every key passes: yaml matches its derivation, json carries an empty name.
+	allMatch := tagMutantsForOriginal(mutants, opStringEmptyLiterals, "`yaml:\"type\" json:\"\"`")
 	if len(allMatch) != 1 {
 		t.Fatalf("allMatch: want 1, got %d: %+v", len(allMatch), mutants)
 	}
 	assertHighStructTagEquivalent(t, allMatch[0])
+
+	// yaml matches, but the non-empty json name drags the whole tag down.
+	jsonNamed := tagMutantsForOriginal(mutants, opStringEmptyLiterals, "`json:\"Type\" yaml:\"type\"`")
+	if len(jsonNamed) != 1 {
+		t.Fatalf("jsonNamed: want 1, got %d", len(jsonNamed))
+	}
+	assertMediumNoStructTagEquivalent(t, jsonNamed[0])
 
 	yamlDiv := tagMutantsForOriginal(mutants, opStringEmptyLiterals, "`json:\"Type\" yaml:\"go_name\"`")
 	if len(yamlDiv) != 1 {
@@ -260,8 +333,21 @@ func TestStrictStructTagParserEdgeCases(t *testing.T) {
 			wantEq: false,
 		},
 		{
-			name:   "exact json still equivalent",
+			// Exact-case json name: still not equivalent, because emptying the
+			// tag flips encoding/json's tagged flag and can change collision
+			// resolution. See tagDefaultDerivation.
+			name:   "exact json name not equivalent",
 			src:    "package sample\ntype T struct { Type string `json:\"Type\"` }\n",
+			wantEq: false,
+		},
+		{
+			name:   "yaml matching derivation is equivalent",
+			src:    "package sample\ntype T struct { Type string `yaml:\"type\"` }\n",
+			wantEq: true,
+		},
+		{
+			name:   "empty json name is equivalent",
+			src:    "package sample\ntype T struct { Type string `json:\"\"` }\n",
 			wantEq: true,
 		},
 	}
@@ -292,15 +378,19 @@ func Message() string { return "Type" }
 	}
 	parents := buildParentIndex(file)
 
+	// Select both literals positionally, by their source text. Deriving the tag
+	// literal from parents[lit].(*ast.Field) instead would re-implement the
+	// function under test, and the assertions below could then never fail.
 	var tagLit, bodyLit *ast.BasicLit
 	ast.Inspect(file, func(n ast.Node) bool {
 		lit, ok := n.(*ast.BasicLit)
 		if !ok || lit.Kind != token.STRING {
 			return true
 		}
-		if field, ok := parents[lit].(*ast.Field); ok && field.Tag == lit {
+		switch lit.Value {
+		case "`json:\"Type\"`":
 			tagLit = lit
-		} else if lit.Value == `"Type"` {
+		case `"Type"`:
 			bodyLit = lit
 		}
 		return true

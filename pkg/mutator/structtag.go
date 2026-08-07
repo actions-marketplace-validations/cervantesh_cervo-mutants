@@ -7,19 +7,41 @@ import (
 	"strings"
 )
 
-// tagDefaultDerivation maps known encoding keys to the name the decoder would
-// derive when the tag is absent. Keys not present here make the whole tag
-// non-equivalent (unknown keys may carry independent semantics).
+// tagKnownKeys lists the encoding keys whose absent-tag behavior this predicate
+// can reason about at all. A tag carrying any other key is never treated as
+// equivalent, because the unknown key may have independent semantics.
+var tagKnownKeys = map[string]struct{}{
+	"yaml": {},
+	"json": {},
+}
+
+// tagDefaultDerivation maps the subset of known keys for which a NON-EMPTY tag
+// name can still be provably equivalent, to the name the decoder derives when
+// the tag is absent.
 //
-// json must match the field name EXACTLY (case-sensitive). encoding/json
-// Unmarshal falls back to a case-insensitive match, so json:"type" on field
-// Type would decode the same. But Marshal would change the emitted key
-// "type" -> "Type". The generator cannot know statically whether a struct is
-// only ever unmarshaled, so the predicate MUST require exact case-sensitive
-// match. Using strings.EqualFold here would be a BUG.
+// yaml qualifies: gopkg.in/yaml.v3 derives strings.ToLower(field.Name) when the
+// tag is absent, and it has no cross-field dominance rule, so a name-for-name
+// match is genuinely behavior-preserving.
+//
+// json deliberately does NOT qualify, and is absent from this map. encoding/json
+// derives the field name exactly, but it also resolves same-name collisions by
+// depth and then by whether the field carries a tag. Emptying a json tag flips
+// that "tagged" flag, which can change which field wins, or drop both:
+//
+//	type T struct {
+//	    Name  string `json:"Name"`
+//	    Other string `json:"Name"`
+//	}
+//
+// Marshal yields {} before the mutation and {"Name":...} after. The colliding
+// field may even live in a different type declaration, reached by equal-depth
+// embedding, so no field-local analysis can ever see it. A non-empty json name
+// is therefore never provably equivalent, however exactly it matches. json
+// stays in tagKnownKeys so a json-tagged UNEXPORTED field still qualifies
+// through the inert-field shortcut, where encoding/json never even enters the
+// field into its collision resolution.
 var tagDefaultDerivation = map[string]func(fieldName string) string{
 	"yaml": strings.ToLower,
-	"json": func(fieldName string) string { return fieldName },
 }
 
 // structTagField reports whether node is the struct-field tag BasicLit of its
@@ -122,7 +144,7 @@ func isProvablyEquivalentTagMutation(field *ast.Field) bool {
 	// Unknown-key gate: any non-derivable key makes the whole tag non-equivalent.
 	// This must run before the unexported-field shortcut.
 	for key := range pairs {
-		if _, known := tagDefaultDerivation[key]; !known {
+		if _, known := tagKnownKeys[key]; !known {
 			return false
 		}
 	}
@@ -145,11 +167,17 @@ func isProvablyEquivalentTagMutation(field *ast.Field) bool {
 		if name == "-" {
 			return false
 		}
-		// Empty name already means "use default" for that key.
+		// Empty name already means "use default" for that key, and it leaves
+		// encoding/json's "tagged" flag false both before and after.
 		if name == "" {
 			continue
 		}
-		derive := tagDefaultDerivation[key]
+		// A known key with no derivation entry (json) can never prove a
+		// non-empty name equivalent. See tagDefaultDerivation.
+		derive, derivable := tagDefaultDerivation[key]
+		if !derivable {
+			return false
+		}
 		if name != derive(fieldName) {
 			return false
 		}
