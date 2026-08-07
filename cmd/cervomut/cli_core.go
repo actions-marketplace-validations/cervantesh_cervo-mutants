@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -334,6 +335,16 @@ func splitList(value string) []string {
 }
 
 func exitCode(err error) int {
+	// A gate failure is a policy verdict, not a malfunction, so it must be
+	// distinguishable from a crash. Match it on the type rather than on the
+	// message: only the fail_under check happens to say "threshold", so the
+	// substring rules below would sort baseline_regression,
+	// baseline_new_survivors, timed_out and compile_error into exit 2, the same
+	// code the tool uses for environment errors and unexpected failures.
+	var gateErr *gateFailureError
+	if errors.As(err, &gateErr) {
+		return 1
+	}
 	msg := err.Error()
 	if strings.Contains(msg, "baseline tests failed") {
 		return 3

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,50 @@ func TestInitListMutatorsExplainAndExitCodes(t *testing.T) {
 	}
 	if exitCode(os.ErrPermission) != 2 || exitCode(assertErr("threshold failed")) != 1 || exitCode(assertErr("baseline tests failed")) != 3 {
 		t.Fatal("exitCode returned unexpected values")
+	}
+}
+
+func TestGateFailuresExitOneRegardlessOfWhichCheckFailed(t *testing.T) {
+	// Only the fail_under check mentions "threshold", so a message-based
+	// classification would sort every other gate into exit 2, which is the code
+	// for environment errors and crashes. A gate verdict must stay
+	// distinguishable from a malfunction.
+	checks := []struct {
+		name    string
+		summary string
+	}{
+		{"fail_under", "score 60.00 below threshold 75.00"},
+		{"baseline_regression", "regression detected against baseline"},
+		{"baseline_new_survivors", "2 new survivors against baseline"},
+		{"timed_out", "1 mutant timed out"},
+		{"compile_error", "3 mutants failed to compile"},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			err := newGateFailureError(engine.GateEvaluation{
+				Evaluated:    true,
+				Passed:       false,
+				FailedChecks: []string{check.name},
+				Checks: []engine.GateCheck{
+					{Name: check.name, Status: engine.GateCheckFailed, Summary: check.summary},
+				},
+			})
+			if code := exitCode(err); code != 1 {
+				t.Fatalf("exitCode for %s gate = %d, want 1 (message was %q)", check.name, code, err.Error())
+			}
+		})
+	}
+
+	// A wrapped gate failure must still be recognised, since errors.As is the
+	// whole point of matching on the type.
+	wrapped := fmt.Errorf("run failed: %w", newGateFailureError(engine.GateEvaluation{
+		Evaluated:    true,
+		Passed:       false,
+		FailedChecks: []string{"timed_out"},
+		Checks:       []engine.GateCheck{{Name: "timed_out", Status: engine.GateCheckFailed, Summary: "1 mutant timed out"}},
+	}))
+	if code := exitCode(wrapped); code != 1 {
+		t.Fatalf("exitCode for wrapped gate failure = %d, want 1", code)
 	}
 }
 
@@ -449,6 +494,7 @@ ci:
   fail_under: 100
 reports:
   output: ` + filepath.ToSlash(filepath.Join(dir, "threshold-out")) + `
+  formats: [summary, json, github-summary]
 limits:
   max_mutants: 1
 `
@@ -457,9 +503,150 @@ limits:
 		t.Fatal(err)
 	}
 	err := run([]string{"run", dir})
-	if err == nil || !strings.Contains(err.Error(), "threshold") {
-		t.Fatalf("run should fail threshold, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "gate failed: fail_under") {
+		t.Fatalf("run should fail gate, got %v", err)
 	}
+
+	thresholdOut := filepath.Join(dir, "threshold-out")
+	report := readRunReportForTest(t, thresholdOut)
+	if report.Gate.Passed || len(report.Gate.FailedChecks) != 1 || report.Gate.FailedChecks[0] != "fail_under" {
+		t.Fatalf("gate report = %+v", report.Gate)
+	}
+	if _, err := os.Stat(filepath.Join(thresholdOut, "summary.txt")); err != nil {
+		t.Fatalf("summary.txt missing after gate failure: %v", err)
+	}
+	summaryData, err := os.ReadFile(filepath.Join(thresholdOut, "github-summary.md"))
+	if err != nil {
+		t.Fatalf("github-summary.md missing after gate failure: %v", err)
+	}
+	if !strings.Contains(string(summaryData), "Gate: **failed**") || !strings.Contains(string(summaryData), "fail_under") {
+		t.Fatalf("github summary missing gate failure details:\n%s", string(summaryData))
+	}
+}
+
+func TestRunCommandSmallLibraryGateSmoke(t *testing.T) {
+	workspace := copyExampleWorkspaceForTest(t, "small-library")
+	t.Chdir(workspace)
+	writeSmallLibraryGateConfig(t, workspace, 0)
+
+	t.Run("missing baseline skips baseline gate checks", func(t *testing.T) {
+		output := captureStdout(t, func() {
+			if err := run([]string{"run", "./..."}); err != nil {
+				t.Fatalf("initial run returned error: %v", err)
+			}
+		})
+		result := readRunReportForTest(t, filepath.Join(workspace, ".cervomut", "reports"))
+		if !result.Gate.Evaluated || !result.Gate.Passed {
+			t.Fatalf("initial gate = %+v", result.Gate)
+		}
+		if result.Baseline.Available {
+			t.Fatalf("baseline should not be available on first run: %+v", result.Baseline)
+		}
+		if status := gateCheckStatusForTest(t, result.Gate, "baseline_regression"); status != engine.GateCheckSkipped {
+			t.Fatalf("baseline_regression status = %q, want %q", status, engine.GateCheckSkipped)
+		}
+		if status := gateCheckStatusForTest(t, result.Gate, "baseline_new_survivors"); status != engine.GateCheckSkipped {
+			t.Fatalf("baseline_new_survivors status = %q, want %q", status, engine.GateCheckSkipped)
+		}
+		if !strings.Contains(output, "Gate skips: baseline_regression") {
+			t.Fatalf("initial output missing gate skip details:\n%s", output)
+		}
+	})
+
+	t.Run("accepted baseline enables comparison without failing", func(t *testing.T) {
+		if err := run([]string{"baseline", "update"}); err != nil {
+			t.Fatalf("baseline update returned error: %v", err)
+		}
+		output := captureStdout(t, func() {
+			if err := run([]string{"run", "./..."}); err != nil {
+				t.Fatalf("run with accepted baseline returned error: %v", err)
+			}
+		})
+		result := readRunReportForTest(t, filepath.Join(workspace, ".cervomut", "reports"))
+		if !result.Gate.Evaluated || !result.Gate.Passed {
+			t.Fatalf("baseline run gate = %+v", result.Gate)
+		}
+		if !result.Baseline.Available || result.Baseline.Regression || len(result.Baseline.NewSurvivors) != 0 {
+			t.Fatalf("baseline comparison = %+v", result.Baseline)
+		}
+		if status := gateCheckStatusForTest(t, result.Gate, "baseline_regression"); status != engine.GateCheckPassed {
+			t.Fatalf("baseline_regression status = %q, want %q", status, engine.GateCheckPassed)
+		}
+		if status := gateCheckStatusForTest(t, result.Gate, "baseline_new_survivors"); status != engine.GateCheckPassed {
+			t.Fatalf("baseline_new_survivors status = %q, want %q", status, engine.GateCheckPassed)
+		}
+		if !strings.Contains(output, "Gate: passed") {
+			t.Fatalf("baseline run output missing gate pass:\n%s", output)
+		}
+	})
+
+	t.Run("fail_under still writes reports before returning gate failure", func(t *testing.T) {
+		writeSmallLibraryGateConfig(t, workspace, 101)
+		var gateErr error
+		output := captureStdout(t, func() {
+			gateErr = run([]string{"run", "./..."})
+		})
+		if gateErr == nil || !strings.Contains(gateErr.Error(), "gate failed: fail_under") {
+			t.Fatalf("expected fail_under gate error, got %v", gateErr)
+		}
+		if code := exitCode(gateErr); code != 1 {
+			t.Fatalf("exitCode(gateErr) = %d, want 1", code)
+		}
+		result := readRunReportForTest(t, filepath.Join(workspace, ".cervomut", "reports"))
+		if !result.Gate.Evaluated || result.Gate.Passed {
+			t.Fatalf("fail_under gate = %+v", result.Gate)
+		}
+		if got := result.Thresholds["fail_under"]; got != float64(101) {
+			t.Fatalf("threshold fail_under = %#v, want 101", got)
+		}
+		if len(result.Gate.FailedChecks) != 1 || result.Gate.FailedChecks[0] != "fail_under" {
+			t.Fatalf("failed checks = %+v, want [fail_under]", result.Gate.FailedChecks)
+		}
+		if _, err := os.Stat(filepath.Join(workspace, ".cervomut", "reports", "summary.txt")); err != nil {
+			t.Fatalf("summary.txt missing after gate failure: %v", err)
+		}
+		summaryData, err := os.ReadFile(filepath.Join(workspace, ".cervomut", "reports", "github-summary.md"))
+		if err != nil {
+			t.Fatalf("github-summary.md missing after gate failure: %v", err)
+		}
+		if !strings.Contains(output, "Gate: failed") || !strings.Contains(string(summaryData), "Gate: **failed**") {
+			t.Fatalf("gate failure artifacts missing failed gate details:\nstdout:\n%s\n\ngithub summary:\n%s", output, string(summaryData))
+		}
+	})
+
+	t.Run("invalid baseline fails structurally instead of skipping", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(workspace, ".cervomut", "baseline.json"), []byte("not-json"), 0o600); err != nil {
+			t.Fatalf("write invalid baseline: %v", err)
+		}
+		reportDir := filepath.Join(workspace, ".cervomut", "reports")
+		for _, name := range []string{mutationReportFileName, failureDebugFileName} {
+			path := filepath.Join(reportDir, name)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("remove stale artifact %s: %v", path, err)
+			}
+		}
+		var runErr error
+		_ = captureStdout(t, func() {
+			runErr = run([]string{"run", "./..."})
+		})
+		if runErr == nil || !strings.Contains(runErr.Error(), "environment_error:") {
+			t.Fatalf("expected environment_error, got %v", runErr)
+		}
+		if code := exitCode(runErr); code != 2 {
+			t.Fatalf("exitCode(runErr) = %d, want 2", code)
+		}
+		report := readRunReportForTest(t, reportDir)
+		if report.Failure == nil || report.Failure.Kind != "environment_error" {
+			t.Fatalf("failure report = %+v", report.Failure)
+		}
+		if report.StoppedReason != "environment_error" {
+			t.Fatalf("stopped_reason = %q, want environment_error", report.StoppedReason)
+		}
+		debug := readFailureDebugForTest(t, reportDir)
+		if debug.Kind != "environment_error" || !strings.Contains(debug.Message, "invalid character") {
+			t.Fatalf("failure debug artifact = %+v", debug)
+		}
+	})
 }
 
 func TestRunCommandWritesStructuredFailureArtifactsOnConfigError(t *testing.T) {
@@ -738,6 +925,87 @@ func TestIsPositiveOrZero(t *testing.T) {
 }
 `,
 	})
+}
+
+func copyExampleWorkspaceForTest(t *testing.T, name string) string {
+	t.Helper()
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	src := filepath.Join(repoRoot, "examples", name)
+	dst := filepath.Join(t.TempDir(), name)
+	if err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	}); err != nil {
+		t.Fatalf("copy example workspace: %v", err)
+	}
+	return dst
+}
+
+func writeSmallLibraryGateConfig(t *testing.T, workspace string, failUnder int) {
+	t.Helper()
+	cfg := fmt.Sprintf(`version: 1
+scope:
+  mode: all
+  include: ["./..."]
+tests:
+  command: ["go", "test", "./..."]
+  timeout: 20s
+  baseline_required: true
+mutators:
+  profile: conservative-fast
+execution:
+  workers: 2
+  isolation: overlay
+selection:
+  mode: package
+history:
+  enabled: true
+  path: .cervomut/history.json
+cache:
+  enabled: true
+  mode: off
+  path: .cervomut/cache
+baseline:
+  enabled: true
+  path: .cervomut/baseline.json
+  fail_on_regression: true
+  fail_on_new_survivors: true
+ci:
+  fail_under: %d
+  fail_on_timeout: true
+  fail_on_compile_error: false
+reports:
+  output: .cervomut/reports
+  formats: [summary, json, github-summary]
+`, failUnder)
+	if err := os.WriteFile(filepath.Join(workspace, configFileName), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write gate config: %v", err)
+	}
+}
+
+func gateCheckStatusForTest(t *testing.T, gate engine.GateEvaluation, name string) engine.GateCheckStatus {
+	t.Helper()
+	for _, check := range gate.Checks {
+		if check.Name == name {
+			return check.Status
+		}
+	}
+	t.Fatalf("gate check %q missing from %+v", name, gate.Checks)
+	return ""
 }
 
 func extractMutantIDForTest(t *testing.T, report string) string {
