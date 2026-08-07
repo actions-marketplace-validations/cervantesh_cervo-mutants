@@ -16,10 +16,8 @@ reopening it.
 - Phase 5 (`#180`) and Phase 6 (`#181`) are also closed; they now represent
   seeded future-direction backlog rather than the repo's currently active
   execution lane.
-- The current open repo-owned backlog is concentrated in Phase 2 hardening:
-  epic `#352`, child issues `#353`-`#364`, plus the active gate-policy follow-up
-  `#368`.
-- The latest public release is `v0.4.4` from 2026-06-28.
+- The Phase 2 hardening lane (#352–#364, #368, #374, #375) landed in 0.4.5; the active backlog should be reseeded from the post-refresh future path below.
+- The latest public release is `v0.4.5` from 2026-08-07.
 
 ## Post-Refresh Future Path
 
@@ -417,3 +415,4 @@ Core scenarios that must stay covered across the roadmap:
   contracts, and explicit support decisions.
 - Hosted or commercial adjacencies must remain optional and downstream of the
   OSS core.
+

@@ -20,7 +20,7 @@ go install github.com/cervantesh/cervo-mutants/cmd/cervomut@latest
 Pin a specific version when you need reproducible installs:
 
 ```powershell
-go install github.com/cervantesh/cervo-mutants/cmd/cervomut@v0.4.4
+go install github.com/cervantesh/cervo-mutants/cmd/cervomut@v0.4.5
 ```
 
 Upgrade later with the same command, replacing the version suffix as needed.
@@ -36,12 +36,12 @@ The release workflow publishes archive names in this shape:
 - `cervomut_<version>_windows_amd64.zip`
 - `SHA256SUMS`
 
-Replace `<version>` below with the tag you want, for example `v0.4.4`.
+Replace `<version>` below with the tag you want, for example `v0.4.5`.
 
 ### Windows
 
 ```powershell
-$version = "v0.4.4"
+$version = "v0.4.5"
 $name = "cervomut_${version}_windows_amd64.zip"
 Invoke-WebRequest "https://github.com/cervantesh/cervo-mutants/releases/download/$version/$name" -OutFile $name
 Expand-Archive $name -DestinationPath cervomut-install -Force
@@ -53,7 +53,7 @@ release metadata files.
 ### Linux
 
 ```bash
-version=v0.4.4
+version=v0.4.5
 name="cervomut_${version}_linux_amd64.tar.gz"
 curl -LO "https://github.com/cervantesh/cervo-mutants/releases/download/${version}/${name}"
 tar -xzf "${name}"
@@ -62,7 +62,7 @@ tar -xzf "${name}"
 ### macOS
 
 ```bash
-version=v0.4.4
+version=v0.4.5
 name="cervomut_${version}_darwin_arm64.tar.gz"
 curl -LO "https://github.com/cervantesh/cervo-mutants/releases/download/${version}/${name}"
 tar -xzf "${name}"
@@ -107,3 +107,4 @@ For CLI or report-surface changes, also read:
 - [docs/releasing.md](releasing.md)
 - [docs/compatibility-policy.md](compatibility-policy.md)
 - [docs/upgrade-notes/README.md](upgrade-notes/README.md)
+

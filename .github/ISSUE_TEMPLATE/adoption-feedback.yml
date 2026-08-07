@@ -62,7 +62,7 @@ body:
     attributes:
       label: CervoMutants version
       description: Release tag, commit SHA, or local build identifier.
-      placeholder: v0.4.4
+      placeholder: v0.4.5
     validations:
       required: true
   - type: dropdown
@@ -213,3 +213,4 @@ body:
         - CI run URL
     validations:
       required: false
+
