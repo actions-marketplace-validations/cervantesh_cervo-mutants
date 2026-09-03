@@ -346,13 +346,14 @@ type mutationContext struct {
 }
 
 type semanticMetadata struct {
-	tags                []string
-	group               string
-	groupLabel          string
-	groupReason         string
-	platformSensitive   bool
-	nonProgressRisk     string
-	suggestedSkipReason string
+	tags                   []string
+	group                  string
+	groupLabel             string
+	groupReason            string
+	platformSensitive      bool
+	nonProgressRisk        string
+	suggestedSkipReason    string
+	equivalentRiskOverride string
 }
 
 func ValidateInlineIgnores(filename string, src []byte, requireReason bool) ([]inlineIgnore, error) {
@@ -478,6 +479,9 @@ func addIdentMutants(ctx mutationContext, ident *ast.Ident) {
 
 func addBasicLitMutants(ctx mutationContext, lit *ast.BasicLit) {
 	if lit.Kind == token.STRING && lit.Value != `""` {
+		if isImportPath(ctx.parents, lit) {
+			return
+		}
 		addMutation(ctx, lit, opStringEmptyLiterals, lit.Value, `""`)
 		addMutation(ctx, lit, opLiterals, lit.Value, `""`)
 		return
@@ -683,7 +687,7 @@ func addMutation(ctx mutationContext, node ast.Node, operator, original, mutated
 		Fingerprint:         fp,
 		Hint:                hint(operator),
 		Description:         description(ctx.fn, operator, original, mutated),
-		EquivalentRisk:      equivalentRisk(operator),
+		EquivalentRisk:      equivalentRiskFor(operator, meta),
 		Recommendation:      recommendation(operator),
 		CompileErrorRisk:    compileErrorRisk(operator),
 		SemanticTags:        meta.tags,
@@ -715,6 +719,16 @@ func buildParentIndex(root ast.Node) map[ast.Node]ast.Node {
 	return parents
 }
 
+// isImportPath reports whether node is the Path literal of an *ast.ImportSpec.
+func isImportPath(parents map[ast.Node]ast.Node, node ast.Node) bool {
+	lit, ok := node.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return false
+	}
+	spec, ok := parents[lit].(*ast.ImportSpec)
+	return ok && spec.Path == lit
+}
+
 func classifySemanticMutation(ctx mutationContext, node ast.Node, operator string) semanticMetadata {
 	meta := semanticMetadata{}
 	if risk := nonProgressLoopRisk(ctx.parents, node, operator); risk != "" {
@@ -742,6 +756,16 @@ func classifySemanticMutation(ctx mutationContext, node ast.Node, operator strin
 			meta.suggestedSkipReason = "review once for this semantic group before treating each survivor independently"
 		}
 	}
+	if operator == opStringEmptyLiterals || operator == opLiterals {
+		if field, ok := structTagField(ctx.parents, node); ok && isProvablyEquivalentTagMutation(field) {
+			meta.equivalentRiskOverride = "high"
+			meta.tags = appendUnique(meta.tags, "struct-tag-equivalent")
+			if meta.suggestedSkipReason == "" {
+				meta.suggestedSkipReason = "tag name matches the decoder's default derivation; emptying it cannot change behavior"
+			}
+		}
+	}
+	// Guard stays correct: equivalent-tag override always sets a tag, so metadata is retained.
 	if len(meta.tags) == 0 {
 		return semanticMetadata{}
 	}
@@ -1032,6 +1056,13 @@ func equivalentRisk(operator string) string {
 		return "unknown"
 	}
 	return spec.EquivalentMutantRisk
+}
+
+func equivalentRiskFor(operator string, meta semanticMetadata) string {
+	if meta.equivalentRiskOverride != "" {
+		return meta.equivalentRiskOverride
+	}
+	return equivalentRisk(operator)
 }
 
 func recommendation(operator string) string {
